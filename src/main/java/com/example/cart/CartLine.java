@@ -10,7 +10,7 @@ public record CartLine(Product product, int quantity) {
         }
     }
 
-    public int lineTotalCents() {
-        return Math.toIntExact((long) product.priceCents() * quantity);
+    public Money lineTotal() {
+        return product.price().multiply(quantity);
     }
 }

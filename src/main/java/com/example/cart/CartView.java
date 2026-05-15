@@ -5,5 +5,5 @@ import java.util.List;
 public interface CartView {
     List<CartLine> lines();
 
-    int subtotalCents();
+    Money subtotal();
 }

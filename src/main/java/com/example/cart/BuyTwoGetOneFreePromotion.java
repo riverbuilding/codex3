@@ -23,20 +23,25 @@ public class BuyTwoGetOneFreePromotion implements Promotion {
     }
 
     @Override
-    public int discountCents(CartView cart) {
+    public Money discount(CartView cart) {
         if (cart == null) {
             throw new IllegalArgumentException("cart must not be null");
         }
 
-        long discount = 0;
+        Money subtotal = cart.subtotal();
+        if (cart.lines().isEmpty()) {
+            return subtotal;
+        }
+
+        Money discount = Money.zero(subtotal.currency());
         for (CartLine line : cart.lines()) {
             if (!eligibleProductIds.contains(line.product().id())) {
                 continue;
             }
             int freeItems = line.quantity() / 3;
-            discount += (long) freeItems * line.product().priceCents();
+            discount = discount.plus(line.product().price().multiply(freeItems));
         }
 
-        return Math.toIntExact(discount);
+        return discount;
     }
 }

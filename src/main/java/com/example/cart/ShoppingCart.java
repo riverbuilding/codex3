@@ -7,14 +7,20 @@ import java.util.List;
 import java.util.Map;
 
 public class ShoppingCart implements CartView {
+    private final String currency;
     private final Map<String, CartLine> linesByProductId = new HashMap<>();
     private final List<Promotion> promotions;
 
-    public ShoppingCart() {
-        this(List.of());
+    public ShoppingCart(String currency) {
+        this(currency, List.of());
     }
 
-    public ShoppingCart(List<Promotion> promotions) {
+    public ShoppingCart(String currency, List<Promotion> promotions) {
+        if (currency == null || currency.isBlank()) {
+            throw new IllegalArgumentException("currency must not be null or blank");
+        }
+        this.currency = currency.toUpperCase();
+
         if (promotions == null) {
             throw new IllegalArgumentException("promotions must not be null");
         }
@@ -28,6 +34,7 @@ public class ShoppingCart implements CartView {
 
     public void addItem(Product product, int quantity) {
         validateProductNotNull(product);
+        validateProductCurrency(product);
         validatePositiveQuantity(quantity, "addItem");
 
         String productId = product.id();
@@ -61,6 +68,7 @@ public class ShoppingCart implements CartView {
 
     public void updateQuantity(Product product, int quantity) {
         validateProductNotNull(product);
+        validateProductCurrency(product);
         if (quantity < 0) {
             throw new IllegalArgumentException("updateQuantity quantity must be >= 0");
         }
@@ -82,34 +90,29 @@ public class ShoppingCart implements CartView {
     }
 
     @Override
-    public int subtotalCents() {
-        long subtotal = 0;
+    public Money subtotal() {
+        Money subtotal = Money.zero(currency);
         for (CartLine line : linesByProductId.values()) {
-            subtotal += line.lineTotalCents();
+            subtotal = subtotal.plus(line.lineTotal());
         }
-        return Math.toIntExact(subtotal);
+        return subtotal;
     }
 
-    public int discountCents() {
-        long discount = 0;
+    public Money discountTotal() {
+        Money discount = Money.zero(currency);
         for (Promotion promotion : promotions) {
-            discount += promotion.discountCents(this);
+            discount = discount.plus(promotion.discount(this));
         }
-        if (discount <= 0) {
-            return 0;
-        }
-        int subtotal = subtotalCents();
-        if (discount > subtotal) {
+
+        Money subtotal = subtotal();
+        if (discount.minorUnits() > subtotal.minorUnits()) {
             return subtotal;
         }
-        return (int) discount;
+        return discount;
     }
 
-    public int totalCents() {
-        int subtotal = subtotalCents();
-        int discount = discountCents();
-        int total = subtotal - discount;
-        return Math.max(0, total);
+    public Money total() {
+        return subtotal().minus(discountTotal());
     }
 
     public String display() {
@@ -119,14 +122,14 @@ public class ShoppingCart implements CartView {
             builder.append("id=").append(product.id())
                     .append(", name=").append(product.name())
                     .append(", qty=").append(line.quantity())
-                    .append(", unitPriceCents=").append(product.priceCents())
-                    .append(", lineTotalCents=").append(line.lineTotalCents())
+                    .append(", unitPrice=").append(product.price().currency()).append(" ").append(product.price().minorUnits())
+                    .append(", lineTotal=").append(line.lineTotal().currency()).append(" ").append(line.lineTotal().minorUnits())
                     .append(System.lineSeparator());
         }
 
-        builder.append("subtotalCents=").append(subtotalCents()).append(System.lineSeparator())
-                .append("discountCents=").append(discountCents()).append(System.lineSeparator())
-                .append("totalCents=").append(totalCents());
+        builder.append("subtotal=").append(subtotal().currency()).append(" ").append(subtotal().minorUnits()).append(System.lineSeparator())
+                .append("discount=").append(discountTotal().currency()).append(" ").append(discountTotal().minorUnits()).append(System.lineSeparator())
+                .append("total=").append(total().currency()).append(" ").append(total().minorUnits());
         return builder.toString();
     }
 
@@ -138,6 +141,12 @@ public class ShoppingCart implements CartView {
     private static void validateProductNotNull(Product product) {
         if (product == null) {
             throw new IllegalArgumentException("Product must not be null");
+        }
+    }
+
+    private void validateProductCurrency(Product product) {
+        if (!currency.equals(product.price().currency())) {
+            throw new IllegalArgumentException("Product currency must match cart currency");
         }
     }
 
