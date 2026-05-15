@@ -1,7 +1,5 @@
 package com.example.cart;
 
-import java.math.BigInteger;
-
 public record CartLine(Product product, int quantity) {
     public CartLine {
         if (product == null) {
@@ -12,8 +10,7 @@ public record CartLine(Product product, int quantity) {
         }
     }
 
-    public BigInteger lineTotalCents() {
-        return BigInteger.valueOf(product.priceCents())
-                .multiply(BigInteger.valueOf(quantity));
+    public int lineTotalCents() {
+        return Math.toIntExact((long) product.priceCents() * quantity);
     }
 }
