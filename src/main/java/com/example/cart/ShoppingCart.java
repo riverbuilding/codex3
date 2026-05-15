@@ -10,6 +10,7 @@ public class ShoppingCart implements CartView {
     private final String currency;
     private final Map<String, CartLine> linesByProductId = new HashMap<>();
     private final List<Promotion> promotions;
+    private CartStatus status = CartStatus.EMPTY;
 
     public ShoppingCart(String currency) {
         this(currency, List.of());
@@ -33,6 +34,7 @@ public class ShoppingCart implements CartView {
     }
 
     public void addItem(Product product, int quantity) {
+        requireMutable("addItem");
         validateProductNotNull(product);
         validateProductCurrency(product);
         validatePositiveQuantity(quantity, "addItem");
@@ -41,14 +43,17 @@ public class ShoppingCart implements CartView {
         CartLine existing = linesByProductId.get(productId);
         if (existing == null) {
             linesByProductId.put(productId, new CartLine(product, quantity));
+            refreshStatusFromLines();
             return;
         }
 
         int mergedQuantity = Math.addExact(existing.quantity(), quantity);
         linesByProductId.put(productId, new CartLine(product, mergedQuantity));
+        refreshStatusFromLines();
     }
 
     public void removeItem(Product product, int quantity) {
+        requireMutable("removeItem");
         validateProductNotNull(product);
         validatePositiveQuantity(quantity, "removeItem");
 
@@ -60,13 +65,16 @@ public class ShoppingCart implements CartView {
 
         if (quantity >= existing.quantity()) {
             linesByProductId.remove(productId);
+            refreshStatusFromLines();
             return;
         }
 
         linesByProductId.put(productId, new CartLine(existing.product(), existing.quantity() - quantity));
+        refreshStatusFromLines();
     }
 
     public void updateQuantity(Product product, int quantity) {
+        requireMutable("updateQuantity");
         validateProductNotNull(product);
         validateProductCurrency(product);
         if (quantity < 0) {
@@ -76,10 +84,37 @@ public class ShoppingCart implements CartView {
         String productId = product.id();
         if (quantity == 0) {
             linesByProductId.remove(productId);
+            refreshStatusFromLines();
             return;
         }
 
         linesByProductId.put(productId, new CartLine(product, quantity));
+        refreshStatusFromLines();
+    }
+
+
+    public CartStatus status() {
+        return status;
+    }
+
+    public void startCheckout() {
+        requireStatus(CartStatus.ACTIVE, "startCheckout");
+        transitionTo(CartStatus.CHECKOUT, "startCheckout");
+    }
+
+    public void cancelCheckout() {
+        requireStatus(CartStatus.CHECKOUT, "cancelCheckout");
+        transitionTo(CartStatus.ACTIVE, "cancelCheckout");
+    }
+
+    public void markPaid() {
+        requireStatus(CartStatus.CHECKOUT, "markPaid");
+        transitionTo(CartStatus.PAID, "markPaid");
+    }
+
+    public void markFulfilled() {
+        requireStatus(CartStatus.PAID, "markFulfilled");
+        transitionTo(CartStatus.FULFILLED, "markFulfilled");
     }
 
     @Override
@@ -129,7 +164,8 @@ public class ShoppingCart implements CartView {
 
         builder.append("subtotal=").append(subtotal().currency()).append(" ").append(subtotal().minorUnits()).append(System.lineSeparator())
                 .append("discount=").append(discountTotal().currency()).append(" ").append(discountTotal().minorUnits()).append(System.lineSeparator())
-                .append("total=").append(total().currency()).append(" ").append(total().minorUnits());
+                .append("total=").append(total().currency()).append(" ").append(total().minorUnits()).append(System.lineSeparator())
+                .append("status=").append(status);
         return builder.toString();
     }
 
@@ -148,6 +184,44 @@ public class ShoppingCart implements CartView {
         if (!currency.equals(product.price().currency())) {
             throw new IllegalArgumentException("Product currency must match cart currency");
         }
+    }
+
+
+    private void requireStatus(CartStatus expected, String operation) {
+        if (status != expected) {
+            throw new IllegalStateException("Cannot " + operation + " when cart status is " + status);
+        }
+    }
+
+    private void requireMutable(String operation) {
+        if (status != CartStatus.EMPTY && status != CartStatus.ACTIVE) {
+            throw new IllegalStateException("Cannot " + operation + " when cart status is " + status);
+        }
+    }
+
+    private void refreshStatusFromLines() {
+        if (linesByProductId.isEmpty()) {
+            transitionTo(CartStatus.EMPTY, "refreshStatusFromLines");
+        } else {
+            transitionTo(CartStatus.ACTIVE, "refreshStatusFromLines");
+        }
+    }
+
+    private void transitionTo(CartStatus nextStatus, String operation) {
+        if (status == nextStatus) {
+            return;
+        }
+        boolean allowed =
+                (status == CartStatus.EMPTY && nextStatus == CartStatus.ACTIVE) ||
+                (status == CartStatus.ACTIVE && nextStatus == CartStatus.EMPTY) ||
+                (status == CartStatus.ACTIVE && nextStatus == CartStatus.CHECKOUT) ||
+                (status == CartStatus.CHECKOUT && nextStatus == CartStatus.ACTIVE) ||
+                (status == CartStatus.CHECKOUT && nextStatus == CartStatus.PAID) ||
+                (status == CartStatus.PAID && nextStatus == CartStatus.FULFILLED);
+        if (!allowed) {
+            throw new IllegalStateException("Invalid cart status transition: " + status + " -> " + nextStatus);
+        }
+        status = nextStatus;
     }
 
     private static void validatePositiveQuantity(int quantity, String operation) {

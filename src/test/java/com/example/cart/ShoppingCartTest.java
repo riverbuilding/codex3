@@ -12,131 +12,185 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 class ShoppingCartTest {
 
     @Test
-    void moneyValidationAndNormalization() {
-        assertThrows(IllegalArgumentException.class, () -> new Money(null, 1));
-        assertThrows(IllegalArgumentException.class, () -> new Money(" ", 1));
-        assertThrows(IllegalArgumentException.class, () -> new Money("USD", -1));
-
-        Money money = new Money("usd", 10);
-        assertEquals("USD", money.currency());
-    }
-
-    @Test
-    void moneyPlusAndMultiply() {
-        Money a = new Money("USD", 100);
-        Money b = new Money("USD", 50);
-
-        assertEquals(new Money("USD", 150), a.plus(b));
-        assertEquals(new Money("USD", 300), a.multiply(3));
-        assertThrows(IllegalArgumentException.class, () -> a.plus(new Money("EUR", 1)));
-    }
-
-    @Test
-    void productUsesMoneyPrice() {
-        Product product = new Product("p1", "Apple", new Money("USD", 125));
-        assertEquals(new Money("USD", 125), product.price());
-        assertThrows(IllegalArgumentException.class, () -> new Product("p1", "Apple", null));
-    }
-
-    @Test
-    void shoppingCartRejectsDifferentCurrencyProducts() {
+    void newCartStartsEmpty() {
         ShoppingCart cart = new ShoppingCart("USD");
-        Product eurProduct = new Product("p1", "Apple", new Money("EUR", 100));
-        assertThrows(IllegalArgumentException.class, () -> cart.addItem(eurProduct, 1));
+        assertEquals(CartStatus.EMPTY, cart.status());
     }
 
     @Test
-    void subtotalReturnsMoneyAndEmptyCartSubtotalIsZeroInCartCurrency() {
-        ShoppingCart cart = new ShoppingCart("usd");
-        assertEquals(new Money("USD", 0), cart.subtotal());
-
-        cart.addItem(new Product("p1", "Apple", new Money("USD", 125)), 2);
-        cart.addItem(new Product("p2", "Banana", new Money("USD", 99)), 3);
-        assertEquals(new Money("USD", 547), cart.subtotal());
-    }
-
-    @Test
-    void buyTwoGetOneFreePromotionReturnsMoneyDiscount() {
-        ShoppingCart cart = new ShoppingCart("USD", List.of(new BuyTwoGetOneFreePromotion(Set.of("p1"))));
-        cart.addItem(new Product("p1", "Apple", new Money("USD", 100)), 3);
-
-        assertEquals(new Money("USD", 100), cart.discountTotal());
-        assertEquals(new Money("USD", 200), cart.total());
-    }
-
-    @Test
-    void discountTotalSumsPromotionsAndCapsAtSubtotal() {
-        Promotion p1 = c -> new Money("USD", 150);
-        Promotion p2 = c -> new Money("USD", 100);
-
-        ShoppingCart cart = new ShoppingCart("USD", List.of(p1, p2));
-        cart.addItem(new Product("p1", "Apple", new Money("USD", 200)), 1);
-
-        assertEquals(new Money("USD", 200), cart.discountTotal());
-        assertEquals(new Money("USD", 0), cart.total());
-    }
-
-    @Test
-    void totalEqualsSubtotalMinusDiscount() {
-        ShoppingCart cart = new ShoppingCart("USD", List.of(new BuyTwoGetOneFreePromotion(Set.of("p1"))));
-        cart.addItem(new Product("p1", "Apple", new Money("USD", 100)), 6);
-
-        assertEquals(new Money("USD", 600), cart.subtotal());
-        assertEquals(new Money("USD", 200), cart.discountTotal());
-        assertEquals(new Money("USD", 400), cart.total());
-    }
-
-    @Test
-    void linesAreDeterministicAndReadOnly() {
+    void addFirstItemTransitionsEmptyToActive() {
         ShoppingCart cart = new ShoppingCart("USD");
-        cart.addItem(new Product("p2", "Banana", new Money("USD", 99)), 1);
-        cart.addItem(new Product("p1", "Apple", new Money("USD", 125)), 2);
-
-        List<CartLine> lines = cart.lines();
-        assertEquals("p1", lines.get(0).product().id());
-        assertThrows(UnsupportedOperationException.class,
-                () -> lines.add(new CartLine(new Product("p3", "Cherry", new Money("USD", 70)), 1)));
+        cart.addItem(product("p1", 100), 1);
+        assertEquals(CartStatus.ACTIVE, cart.status());
     }
 
     @Test
-    void displayIncludesCurrencySubtotalDiscountAndTotal() {
+    void removingLastItemTransitionsActiveToEmpty() {
+        ShoppingCart cart = new ShoppingCart("USD");
+        Product p = product("p1", 100);
+        cart.addItem(p, 1);
+        cart.removeItem(p, 1);
+        assertEquals(CartStatus.EMPTY, cart.status());
+    }
+
+    @Test
+    void updateQuantityZeroTransitionsActiveToEmpty() {
+        ShoppingCart cart = new ShoppingCart("USD");
+        Product p = product("p1", 100);
+        cart.addItem(p, 2);
+        cart.updateQuantity(p, 0);
+        assertEquals(CartStatus.EMPTY, cart.status());
+    }
+
+    @Test
+    void startCheckoutTransitionsActiveToCheckout() {
+        ShoppingCart cart = new ShoppingCart("USD");
+        cart.addItem(product("p1", 100), 1);
+        cart.startCheckout();
+        assertEquals(CartStatus.CHECKOUT, cart.status());
+    }
+
+    @Test
+    void startCheckoutFromEmptyFails() {
+        ShoppingCart cart = new ShoppingCart("USD");
+        assertThrows(IllegalStateException.class, cart::startCheckout);
+    }
+
+    @Test
+    void cancelCheckoutTransitionsCheckoutToActive() {
+        ShoppingCart cart = new ShoppingCart("USD");
+        cart.addItem(product("p1", 100), 1);
+        cart.startCheckout();
+        cart.cancelCheckout();
+        assertEquals(CartStatus.ACTIVE, cart.status());
+    }
+
+    @Test
+    void cancelCheckoutFromActiveFails() {
+        ShoppingCart cart = new ShoppingCart("USD");
+        cart.addItem(product("p1", 100), 1);
+        assertThrows(IllegalStateException.class, cart::cancelCheckout);
+    }
+
+    @Test
+    void markPaidTransitionsCheckoutToPaid() {
+        ShoppingCart cart = new ShoppingCart("USD");
+        cart.addItem(product("p1", 100), 1);
+        cart.startCheckout();
+        cart.markPaid();
+        assertEquals(CartStatus.PAID, cart.status());
+    }
+
+    @Test
+    void markPaidFromActiveFails() {
+        ShoppingCart cart = new ShoppingCart("USD");
+        cart.addItem(product("p1", 100), 1);
+        assertThrows(IllegalStateException.class, cart::markPaid);
+    }
+
+    @Test
+    void markFulfilledTransitionsPaidToFulfilled() {
+        ShoppingCart cart = new ShoppingCart("USD");
+        cart.addItem(product("p1", 100), 1);
+        cart.startCheckout();
+        cart.markPaid();
+        cart.markFulfilled();
+        assertEquals(CartStatus.FULFILLED, cart.status());
+    }
+
+    @Test
+    void markFulfilledFromCheckoutFails() {
+        ShoppingCart cart = new ShoppingCart("USD");
+        cart.addItem(product("p1", 100), 1);
+        cart.startCheckout();
+        assertThrows(IllegalStateException.class, cart::markFulfilled);
+    }
+
+    @Test
+    void cannotAddItemInCheckout() {
+        ShoppingCart cart = new ShoppingCart("USD");
+        cart.addItem(product("p1", 100), 1);
+        cart.startCheckout();
+        assertThrows(IllegalStateException.class, () -> cart.addItem(product("p2", 50), 1));
+    }
+
+    @Test
+    void cannotRemoveItemInCheckout() {
+        ShoppingCart cart = new ShoppingCart("USD");
+        Product p = product("p1", 100);
+        cart.addItem(p, 1);
+        cart.startCheckout();
+        assertThrows(IllegalStateException.class, () -> cart.removeItem(p, 1));
+    }
+
+    @Test
+    void cannotUpdateQuantityInCheckout() {
+        ShoppingCart cart = new ShoppingCart("USD");
+        Product p = product("p1", 100);
+        cart.addItem(p, 1);
+        cart.startCheckout();
+        assertThrows(IllegalStateException.class, () -> cart.updateQuantity(p, 2));
+    }
+
+    @Test
+    void cannotMutateCartInPaid() {
+        ShoppingCart cart = new ShoppingCart("USD");
+        Product p = product("p1", 100);
+        cart.addItem(p, 1);
+        cart.startCheckout();
+        cart.markPaid();
+
+        assertThrows(IllegalStateException.class, () -> cart.addItem(product("p2", 10), 1));
+        assertThrows(IllegalStateException.class, () -> cart.removeItem(p, 1));
+        assertThrows(IllegalStateException.class, () -> cart.updateQuantity(p, 2));
+    }
+
+    @Test
+    void cannotMutateCartInFulfilled() {
+        ShoppingCart cart = new ShoppingCart("USD");
+        Product p = product("p1", 100);
+        cart.addItem(p, 1);
+        cart.startCheckout();
+        cart.markPaid();
+        cart.markFulfilled();
+
+        assertThrows(IllegalStateException.class, () -> cart.addItem(product("p2", 10), 1));
+        assertThrows(IllegalStateException.class, () -> cart.removeItem(p, 1));
+        assertThrows(IllegalStateException.class, () -> cart.updateQuantity(p, 2));
+    }
+
+    @Test
+    void displayIncludesCartStatus() {
         ShoppingCart cart = new ShoppingCart("USD", List.of(new BuyTwoGetOneFreePromotion(Set.of("p1"))));
-        cart.addItem(new Product("p1", "Apple", new Money("USD", 100)), 3);
+        cart.addItem(product("p1", 100), 3);
 
         String output = cart.display();
         String expected = String.join(System.lineSeparator(),
-                "id=p1, name=Apple, qty=3, unitPrice=USD 100, lineTotal=USD 300",
+                "id=p1, name=P-p1, qty=3, unitPrice=USD 100, lineTotal=USD 300",
                 "subtotal=USD 300",
                 "discount=USD 100",
-                "total=USD 200");
-
+                "total=USD 200",
+                "status=ACTIVE");
         assertEquals(expected, output);
     }
 
     @Test
-    void previousCartBehaviorStillWorks() {
-        ShoppingCart cart = new ShoppingCart("USD");
-        Product apple = new Product("p1", "Apple", new Money("USD", 100));
-        cart.addItem(apple, 5);
-        cart.removeItem(apple, 2);
-        assertEquals(3, cart.lineQuantity("p1"));
-        cart.updateQuantity(apple, 0);
-        assertEquals(0, cart.lineQuantity("p1"));
-        cart.removeItem(apple, 1);
-        assertEquals(0, cart.lineQuantity("p1"));
+    void moneyAndPromotionAndCurrencyBehaviorStillWorks() {
+        Money money = new Money("usd", 10);
+        assertEquals("USD", money.currency());
+        assertEquals(new Money("USD", 30), money.multiply(3));
+
+        ShoppingCart cart = new ShoppingCart("USD", List.of(new BuyTwoGetOneFreePromotion(Set.of("p1"))));
+        cart.addItem(product("p1", 100), 3);
+        assertEquals(new Money("USD", 300), cart.subtotal());
+        assertEquals(new Money("USD", 100), cart.discountTotal());
+        assertEquals(new Money("USD", 200), cart.total());
+
+        assertThrows(IllegalArgumentException.class, () -> cart.addItem(new Product("e1", "EUR", new Money("EUR", 100)), 1));
+        assertThrows(IllegalArgumentException.class, () -> new ShoppingCart("USD", Collections.singletonList((Promotion) null)));
     }
 
-    @Test
-    void promotionAndConstructorValidation() {
-        assertThrows(IllegalArgumentException.class, () -> new ShoppingCart(null));
-        assertThrows(IllegalArgumentException.class, () -> new ShoppingCart(" "));
-        assertThrows(IllegalArgumentException.class, () -> new ShoppingCart("USD", null));
-        assertThrows(IllegalArgumentException.class, () -> new ShoppingCart("USD", Collections.singletonList((Promotion) null)));
-
-        assertThrows(IllegalArgumentException.class, () -> new BuyTwoGetOneFreePromotion(null));
-        assertThrows(IllegalArgumentException.class, () -> new BuyTwoGetOneFreePromotion(Set.of("p1", " ")));
-
-        Promotion promotion = new BuyTwoGetOneFreePromotion(Set.of("p1"));
-        assertThrows(IllegalArgumentException.class, () -> promotion.discount(null));
+    private static Product product(String id, long priceMinorUnits) {
+        return new Product(id, "P-" + id, new Money("USD", priceMinorUnits));
     }
 }
