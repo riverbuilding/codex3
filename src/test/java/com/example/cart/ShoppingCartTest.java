@@ -2,6 +2,8 @@ package com.example.cart;
 
 import org.junit.jupiter.api.Test;
 
+import java.math.BigInteger;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -88,7 +90,15 @@ class ShoppingCartTest {
         cart.addItem(new Product("p1", "Apple", 125), 2);
         cart.addItem(new Product("p2", "Banana", 99), 3);
 
-        assertEquals(547, cart.subtotalCents());
+        assertEquals(BigInteger.valueOf(547), cart.subtotalCents());
+    }
+
+    @Test
+    void subtotalSupportsValuesBeyondIntRange() {
+        ShoppingCart cart = new ShoppingCart();
+        cart.addItem(new Product("p1", "Expensive", Integer.MAX_VALUE), 2);
+
+        assertEquals(BigInteger.valueOf(Integer.MAX_VALUE).multiply(BigInteger.valueOf(2)), cart.subtotalCents());
     }
 
     @Test

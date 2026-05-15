@@ -1,5 +1,6 @@
 package com.example.cart;
 
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -57,10 +58,10 @@ public class ShoppingCart {
         linesByProductId.put(productId, new CartLine(product, quantity));
     }
 
-    public int subtotalCents() {
+    public BigInteger subtotalCents() {
         return linesByProductId.values().stream()
-                .mapToInt(CartLine::lineTotalCents)
-                .sum();
+                .map(CartLine::lineTotalCents)
+                .reduce(BigInteger.ZERO, BigInteger::add);
     }
 
     public String display() {
